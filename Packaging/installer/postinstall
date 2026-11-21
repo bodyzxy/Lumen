@@ -1,0 +1,10 @@
+#!/bin/sh
+# 安装完成后运行：刷新 Lumen 的图标和系统登记信息
+APP="/Applications/Lumen.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+touch "$APP"
+if [ -x "$LSREGISTER" ]; then
+    "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+fi
+exit 0

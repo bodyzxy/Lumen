@@ -18,30 +18,34 @@
 
 ## English
 
-### Download
+### Download & install
 
-Grab **Lumen-1.0.0-macOS.zip** from [Releases](https://github.com/bodyzxy/Lumen/releases/latest) (or from the [`release/`](release/) folder), unzip it, and drag **Lumen.app** into Applications. It runs on Apple silicon and Intel Macs with macOS 14 or later.
+1. Download **Lumen-1.0.0.pkg** from [Releases](https://github.com/bodyzxy/Lumen/releases/latest).
+2. Double-click it and follow the installer. Lumen is installed into your **Applications** folder.
+3. Open Lumen from Applications or Launchpad.
 
-This build isn't notarized, so the first time you open it macOS may say the developer can't be verified. Right-click **Lumen.app → Open**, then click **Open** again. You only need to do this once.
+Requires macOS 14 or later on a Mac with Apple silicon.
+
+**If macOS blocks the installer.** This build isn't notarized by Apple, so the first time you open the `.pkg`, macOS may say it can't verify it. Click **Done**, then open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the message about Lumen, and confirm. The installer then opens normally. You only need to do this once; the installed app opens without any warning.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/bodyzxy/Lumen.git
 cd Lumen
-./run.sh          # build and run (release mode)
-./package.sh      # build dist/Lumen.app and dist/Lumen-1.0.0-macOS.zip
+bash run.sh          # build and run (release mode)
+bash package.sh      # build the installer: dist/Lumen-1.0.0.pkg
 ```
 
-Requires Xcode or the Command Line Tools. `package.sh` builds a universal app when Xcode is installed.
+Requires Xcode or the Command Line Tools.
 
-Lumen uses only Apple's built-in frameworks (SwiftUI, Core Image, Metal) and has no third-party dependencies. The packaged app is just a few megabytes.
+Lumen uses only Apple's built-in frameworks (SwiftUI, Core Image, Metal) and has no third-party dependencies. The installed app is just a few megabytes.
 
 ### Run
 
 ```bash
 cd Lumen
-./run.sh            # same as: swift run -c release Lumen
+bash run.sh         # same as: swift run -c release Lumen
 ```
 
 The first build takes 1–3 minutes. Always use release mode (`run.sh` does this); debug builds feel sluggish when dragging sliders.
@@ -163,13 +167,13 @@ Consecutive per-pixel adjustments are baked into one 64³ 3D LUT and applied on 
 ```
 Lumen/
 ├── Package.swift
-├── run.sh              build & run / 编译并运行
-├── package.sh          build Lumen.app + zip / 打包 Lumen.app 和 zip
-├── publish.sh          package & push to GitHub / 打包并推送到 GitHub
-├── release/            packaged app / 打包好的软件
+├── run.sh              build & run
+├── package.sh          build the installer (.pkg)
+├── publish.sh          push to GitHub & update the release
 ├── Packaging/
-│   ├── AppIcon.icns        app icon for the packaged .app
-│   └── make_icon.py        script that draws the icon
+│   ├── AppIcon.icns        app icon
+│   ├── make_icon.py        script that draws the icon
+│   └── installer/          installer pages & background
 └── Sources/Lumen/
     ├── LumenApp.swift      entry point, menus, shortcuts, settings, language switch
     ├── Localization.swift  Chinese / English switching
@@ -195,30 +199,34 @@ A zone-system tone ring — eleven steps from pure black to pure white — aroun
 
 ## 简体中文
 
-### 下载
+### 下载与安装
 
-从 [Releases](https://github.com/bodyzxy/Lumen/releases/latest)（或仓库里的 [`release/`](release/) 文件夹）下载 **Lumen-1.0.0-macOS.zip**，解压后把 **Lumen.app** 拖进“应用程序”文件夹即可。支持 Apple 芯片和 Intel 芯片的 Mac，需要 macOS 14 或更新版本。
+1. 从 [Releases](https://github.com/bodyzxy/Lumen/releases/latest) 下载 **Lumen-1.0.0.pkg**。
+2. 双击它，按安装向导一步步操作，Lumen 会被安装到“**应用程序**”文件夹。
+3. 在“应用程序”或启动台里打开 Lumen。
 
-这个版本没有经过苹果公证，第一次打开时系统可能会提示“无法验证开发者”。在 **Lumen.app 上点右键 → 打开**，再点一次**打开**即可。只需要操作一次。
+需要 macOS 14 或更新版本，以及 Apple 芯片的 Mac。
+
+**如果系统拦截了安装包**：这个版本没有经过苹果公证，第一次打开 `.pkg` 时系统可能提示无法验证。先点**完成**，然后打开**系统设置 → 隐私与安全性**，往下拉，在关于 Lumen 的提示旁点**仍要打开**并确认，安装程序就能正常打开了。只需要操作一次，装好后的软件可以直接打开，不会再提示。
 
 ### 从源码编译
 
 ```bash
 git clone https://github.com/bodyzxy/Lumen.git
 cd Lumen
-./run.sh          # 编译并运行（release 模式）
-./package.sh      # 生成 dist/Lumen.app 和 dist/Lumen-1.0.0-macOS.zip
+bash run.sh          # 编译并运行（release 模式）
+bash package.sh      # 生成安装包：dist/Lumen-1.0.0.pkg
 ```
 
-需要 Xcode 或 Command Line Tools。装了 Xcode 时，`package.sh` 会编出同时支持 Apple 芯片和 Intel 的通用版本。
+需要 Xcode 或 Command Line Tools。
 
-Lumen 只使用苹果系统自带的框架（SwiftUI、Core Image、Metal），没有任何第三方依赖，打包后只有几 MB。
+Lumen 只使用苹果系统自带的框架（SwiftUI、Core Image、Metal），没有任何第三方依赖，安装后只有几 MB。
 
 ### 运行
 
 ```bash
 cd Lumen
-./run.sh            # 等同于 swift run -c release Lumen
+bash run.sh         # 等同于 swift run -c release Lumen
 ```
 
 第一次编译需要 1～3 分钟。请用 release 模式运行（`run.sh` 已经设置好），debug 模式下拖动滑杆会卡。
@@ -344,13 +352,13 @@ cd Lumen
 ```
 Lumen/
 ├── Package.swift
-├── run.sh              build & run / 编译并运行
-├── package.sh          build Lumen.app + zip / 打包 Lumen.app 和 zip
-├── publish.sh          package & push to GitHub / 打包并推送到 GitHub
-├── release/            packaged app / 打包好的软件
+├── run.sh              编译并运行
+├── package.sh          生成安装包（.pkg）
+├── publish.sh          推送到 GitHub 并更新 Release
 ├── Packaging/
-│   ├── AppIcon.icns        打包 .app 时用的图标
-│   └── make_icon.py        生成图标的脚本
+│   ├── AppIcon.icns        软件图标
+│   ├── make_icon.py        生成图标的脚本
+│   └── installer/          安装向导的页面和背景
 └── Sources/Lumen/
     ├── LumenApp.swift      入口、菜单、快捷键、设置、语言切换
     ├── Localization.swift  中英文切换

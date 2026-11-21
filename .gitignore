@@ -5,3 +5,6 @@ release/
 *.app
 .DS_Store
 xcuserdata/
+
+publish.sh
+RELEASE_NOTES.md

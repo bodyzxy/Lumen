@@ -5,10 +5,9 @@ import SwiftUI
 struct BasicPanel: View {
     @EnvironmentObject var doc: EditDocument
     @Binding var basic: BasicSettings
-    @State private var tab = 0
 
     var body: some View {
-        Pager([L("光影", "Light"), L("色彩", "Color"), L("质感", "Texture"), L("效果", "Effects"), L("校准", "Calibrate")], selection: $tab) { page in
+        Pager([L("光影", "Light"), L("色彩", "Color"), L("质感", "Texture"), L("效果", "Effects"), L("校准", "Calibrate")], selection: $doc.activeBasicTab) { page in
             switch page {
             case 0:
                 Group0 {

@@ -32,11 +32,27 @@ BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 
 # ---------------------------------------------------------------- 2. 组装 .app
 echo "▸ 组装 ${APP_NAME}.app / Assembling the app…"
-rm -rf "${APP}"
-mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+rm -rf "${APP}" "${WORK}"
+mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources" "${WORK}"
 cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 chmod 755 "${APP}/Contents/MacOS/${APP_NAME}"
-cp "Packaging/AppIcon.icns" "${APP}/Contents/Resources/AppIcon.icns"
+if [ -f "${BIN_DIR}/LumenMCP" ]; then
+    cp "${BIN_DIR}/LumenMCP" "${APP}/Contents/MacOS/LumenMCP"
+    chmod 755 "${APP}/Contents/MacOS/LumenMCP"
+fi
+
+# 图标：用苹果官方的 iconutil 从 1024 像素的 PNG 生成全部尺寸
+ICON_SRC="Sources/Lumen/Resources/AppIcon.png"
+ICONSET="${WORK}/AppIcon.iconset"
+mkdir -p "${ICONSET}"
+for size in 16 32 128 256 512; do
+    sips -z "${size}" "${size}" "${ICON_SRC}" --out "${ICONSET}/icon_${size}x${size}.png" >/dev/null
+    double=$((size * 2))
+    sips -z "${double}" "${double}" "${ICON_SRC}" --out "${ICONSET}/icon_${size}x${size}@2x.png" >/dev/null
+done
+if ! iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/AppIcon.icns"; then
+    cp "Packaging/AppIcon.icns" "${APP}/Contents/Resources/AppIcon.icns"
+fi
 
 cat > "${APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -88,6 +104,7 @@ PLIST
 xattr -cr "${APP}"
 codesign --force --sign - --timestamp=none "${APP}"
 codesign --verify --strict "${APP}"
+touch "${APP}"
 
 # 打包前先确认程序本身能正常启动（启动 3 秒后自动关掉）
 echo "▸ 试运行 / Smoke test…"
@@ -106,9 +123,12 @@ fi
 
 # ---------------------------------------------------------------- 3. 生成安装包
 echo "▸ 生成安装包 / Building the installer…"
-rm -rf "${WORK}"
-mkdir -p "${WORK}/root/Applications" "${WORK}/resources"
+mkdir -p "${WORK}/root/Applications" "${WORK}/resources" "${WORK}/scripts"
 ditto "${APP}" "${WORK}/root/Applications/${APP_NAME}.app"
+
+# 安装完成后刷新系统的图标缓存，保证“应用程序”、启动台和程序坞里立刻显示新图标
+cp Packaging/installer/postinstall "${WORK}/scripts/postinstall"
+chmod 755 "${WORK}/scripts/postinstall"
 
 # 组件描述：禁止“重定位”，保证一定装到 /Applications，而不是去覆盖电脑上别处的同名 App
 pkgbuild --analyze --root "${WORK}/root" "${WORK}/component.plist" >/dev/null
@@ -121,6 +141,7 @@ pkgbuild \
     --identifier "${BUNDLE_ID}" \
     --version "${VERSION}" \
     --install-location "/" \
+    --scripts "${WORK}/scripts" \
     "${WORK}/${APP_NAME}-component.pkg" >/dev/null
 
 # 安装向导的欢迎页、完成页和背景

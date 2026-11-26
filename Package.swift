@@ -16,6 +16,10 @@ let package = Package(
             resources: [
                 .copy("Resources/AppIcon.png")
             ]
+        ),
+        .executableTarget(
+            name: "LumenMCP",
+            path: "Sources/LumenMCP"
         )
     ]
 )

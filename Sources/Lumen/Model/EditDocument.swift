@@ -132,6 +132,7 @@ final class EditDocument: ObservableObject {
     @Published var toast: String?
     @Published var showExportSheet = false
     @Published var showInspector = true
+    @Published var activeBasicTab = 0
     @Published var eyedropper: Eyedropper?
 
     var lutCache: [String: CubeLUT] = [:]
@@ -185,8 +186,8 @@ final class EditDocument: ObservableObject {
     func open(url: URL) { open(urls: [url]) }
 
     /// 打开照片：不会覆盖正在编辑的照片，而是加到胶片条里
-    func open(urls: [URL]) {
-        guard !urls.isEmpty else { return }
+    func open(urls: [URL], completion: (([UUID]) -> Void)? = nil) {
+        guard !urls.isEmpty else { completion?([]); return }
         isLoading = true
         ioQueue.async { [weak self] in
             guard let self = self else { return }
@@ -204,6 +205,7 @@ final class EditDocument: ObservableObject {
                 self.isLoading = false
                 guard let first = loaded.first else {
                     self.showToast(L("打不开这张图片", "Couldn't open this image"))
+                    completion?([])
                     return
                 }
                 let previous = self.active
@@ -218,6 +220,7 @@ final class EditDocument: ObservableObject {
                 if let prev = previous, prev.state != EditState() {
                     self.offerApply(from: prev)
                 }
+                completion?(loaded.map(\.id))
             }
         }
     }
@@ -922,5 +925,162 @@ final class EditDocument: ObservableObject {
         }
         toastWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2, execute: work)
+    }
+
+    // MARK: - 自动化 / MCP 程序化接口（无弹窗）
+
+    struct SessionSummary: Codable {
+        let id: String
+        let name: String
+        let path: String
+        let width: Int
+        let height: Int
+        let edited: Bool
+        let active: Bool
+    }
+
+    func sessionSummaries() -> [SessionSummary] {
+        sessions.map { s in
+            let st = s.id == activeID ? state : s.state
+            return SessionSummary(
+                id: s.id.uuidString,
+                name: s.name,
+                path: s.url.path,
+                width: Int(s.full.extent.width),
+                height: Int(s.full.extent.height),
+                edited: st != EditState(),
+                active: s.id == activeID
+            )
+        }
+    }
+
+    func applyEditState(_ s: EditState, triggerSweep: Bool = true) {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.84)) {
+            applyState(s)
+            if !triggerSweep {
+                // applyState already increments sweepToken; keep it when triggerSweep is true
+            }
+        }
+    }
+
+    func loadLUTFile(for id: UUID, url: URL) throws {
+        let lut = try CubeLUT.load(url: url)
+        lutCache[url.path] = lut
+        guard let idx = state.layers.firstIndex(where: { $0.id == id }) else { return }
+        state.layers[idx].params.lut.path = url.path
+        state.layers[idx].params.lut.displayName = url.deletingPathExtension().lastPathComponent
+        state.layers[idx].name = url.deletingPathExtension().lastPathComponent
+    }
+
+    func setMatchReference(for id: UUID, url: URL, completion: @escaping (Bool) -> Void) {
+        guard let current = previewImage else { completion(false); return }
+        ioQueue.async { [weak self] in
+            guard let self = self,
+                  let ref = RenderEngine.loadImage(url: url),
+                  let refCG = self.engine.renderCG(RenderEngine.downscale(ref, maxSide: 512)) else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let refStats = self.engine.colorStats(of: refCG)
+            let srcStats = self.engine.colorStats(of: current)
+            DispatchQueue.main.async {
+                guard let idx = self.state.layers.firstIndex(where: { $0.id == id }) else {
+                    completion(false)
+                    return
+                }
+                self.state.layers[idx].params.matchColor.reference = refStats
+                self.state.layers[idx].params.matchColor.source = srcStats
+                self.state.layers[idx].params.matchColor.referenceName = url.deletingPathExtension().lastPathComponent
+                completion(true)
+            }
+        }
+    }
+
+    func renderPreviewJPEG(maxSide: CGFloat = 1024, quality: Double = 0.86, completion: @escaping ((data: Data, width: Int, height: Int)?) -> Void) {
+        guard let s = active else { completion(nil); return }
+        let snapshot = state
+        let luts = lutCache
+        let src = RenderEngine.downscale(s.preview, maxSide: maxSide)
+        renderQueue.async { [weak self] in
+            guard let self = self else { DispatchQueue.main.async { completion(nil) }; return }
+            let out = self.engine.process(src, state: snapshot, luts: luts)
+            guard let cg = self.engine.renderCG(out) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let rep = NSBitmapImageRep(cgImage: cg)
+            guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: quality]) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            DispatchQueue.main.async {
+                completion((data, cg.width, cg.height))
+            }
+        }
+    }
+
+    func currentColorStats(completion: @escaping (ColorStats?) -> Void) {
+        guard let s = active else { completion(nil); return }
+        let snapshot = state
+        let luts = lutCache
+        let src = RenderEngine.downscale(s.preview, maxSide: 512)
+        renderQueue.async { [weak self] in
+            guard let self = self else { DispatchQueue.main.async { completion(nil) }; return }
+            let out = self.engine.process(src, state: snapshot, luts: luts)
+            let stats = self.engine.renderCG(out).map { self.engine.colorStats(of: $0) }
+            DispatchQueue.main.async { completion(stats) }
+        }
+    }
+
+    func exportToURL(_ url: URL, format: RenderEngine.ExportFormat, quality: Double, maxSide: CGFloat?, completion: @escaping (Result<URL, Error>) -> Void) {
+        guard let s = active else {
+            completion(.failure(NSError(domain: "Lumen", code: 404, userInfo: [NSLocalizedDescriptionKey: "No active photo"])))
+            return
+        }
+        isExporting = true
+        let snapshot = state
+        let luts = lutCache
+        let full = s.full
+        renderQueue.async { [weak self] in
+            guard let self = self else { return }
+            var src = full
+            if let m = maxSide { src = RenderEngine.downscale(src, maxSide: m) }
+            let out = self.engine.process(src, state: snapshot, luts: luts)
+            do {
+                try self.engine.export(out, to: url, format: format, quality: quality)
+                DispatchQueue.main.async {
+                    self.isExporting = false
+                    self.showToast(L("已导出", "Exported"))
+                    completion(.success(url))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isExporting = false
+                    self.showToast(L("导出失败：\(error.localizedDescription)", "Export failed: \(error.localizedDescription)"))
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func exportLUTToURL(_ url: URL, size: Int = 33, completion: @escaping (Result<URL, Error>) -> Void) {
+        let snapshot = state
+        let luts = lutCache
+        ioQueue.async { [weak self] in
+            let clampedSize = max(17, min(65, size))
+            let data = LUTBuilder.build(LUTInputs(fullColorOf: snapshot), size: clampedSize, luts: luts)
+            do {
+                try CubeLUT.writeCube(rgba: data, size: clampedSize, title: url.deletingPathExtension().lastPathComponent, to: url)
+                DispatchQueue.main.async {
+                    self?.showToast(L("LUT 已导出", "LUT exported"))
+                    completion(.success(url))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.showToast(L("导出失败：\(error.localizedDescription)", "Export failed: \(error.localizedDescription)"))
+                    completion(.failure(error))
+                }
+            }
+        }
     }
 }

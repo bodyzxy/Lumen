@@ -11,6 +11,7 @@ struct LumenApp: App {
             RootView()
                 .environmentObject(doc)
                 .frame(minWidth: 1080, minHeight: 680)
+                .onAppear { IPCServer.shared.start(doc: doc) }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))

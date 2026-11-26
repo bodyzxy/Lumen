@@ -195,6 +195,62 @@ Lumen/
 
 A zone-system tone ring — eleven steps from pure black to pure white — around a lens, on a paper-white squircle. Regenerate it with `python3 Packaging/make_icon.py` (requires Pillow and NumPy).
 
+### MCP Server (AI Automation for Cursor / Claude / Codex)
+
+Lumen includes a built-in `LumenMCP` bridge binary that lets AI coding assistants (Cursor, Claude Desktop, Claude Code, Codex, Antigravity, etc.) **control the live Lumen window in real time** over the Model Context Protocol (`stdio`). Every adjustment animates directly on screen (Develop transition, Light Sweep, flowing histogram, ruler sliders, and Inspector tab auto-switching), and you can undo any step with ⌘Z.
+
+#### 1. Build or install
+
+- **If installed via `Lumen.pkg`**: `LumenMCP` is bundled at:
+  ```text
+  /Applications/Lumen.app/Contents/MacOS/LumenMCP
+  ```
+- **If built from source**:
+  ```bash
+  swift build -c release
+  # Binary path: .build/release/LumenMCP
+  ```
+
+#### 2. Configure your AI client
+
+Add the following to your MCP configuration:
+
+- **Cursor** (`~/.cursor/mcp.json`) / **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+  ```json
+  {
+    "mcpServers": {
+      "lumen": {
+        "command": "/Applications/Lumen.app/Contents/MacOS/LumenMCP",
+        "args": []
+      }
+    }
+  }
+  ```
+- **Claude Code** (`claude mcp add`):
+  ```bash
+  claude mcp add lumen /Applications/Lumen.app/Contents/MacOS/LumenMCP
+  ```
+- **Codex** (`~/.codex/config.toml`):
+  ```toml
+  [mcp_servers.lumen]
+  command = "/Applications/Lumen.app/Contents/MacOS/LumenMCP"
+  ```
+
+*(Replace `/Applications/Lumen.app/Contents/MacOS/LumenMCP` with `/path/to/Lumen/.build/release/LumenMCP` if running from source. If `Lumen.app` isn't open when a tool is called, `LumenMCP` automatically launches it.)*
+
+#### 3. Available MCP Tools
+
+- **Session**: `open_photos`, `list_sessions`, `switch_session`, `close_session`
+- **Inspection (Visual Loop)**: `get_image_analysis` (clipping + histogram + YCbCr stats), `render_preview` (returns JPEG image for vision models), `sample_color`, `auto_white_balance`
+- **Adjustments**: `get_edit_state`, `set_basic_adjustments`, `reset_adjustments`, `add_layer` (all 24 layer kinds), `update_layer`, `layer_action` (`delete` / `duplicate` / `move_up` / `move_down` / `select`)
+- **Looks & Sync**: `apply_preset` (`warmFilm`, `japaneseFresh`, `tealOrange`, `contrastBW`, `fadedVintage`, `moodyNight`, or JSON file), `sync_adjustments`, `undo`, `redo`
+- **View & Export**: `set_view` (`split` compare, `show_original`, `zoom`), `export_photo`, `export_lut`
+
+#### 4. Example prompts
+
+- *"Open `/Users/me/Desktop/photo.jpg` in Lumen, analyze the histogram, fix the exposure and white balance, apply a warm film grade, and show me a split-view comparison."*
+- *"Add an HSL layer in Lumen to shift greens slightly toward cyan and soften skin orange saturation, then export a 3840px JPEG."*
+
 ---
 
 ## 简体中文
@@ -379,3 +435,58 @@ Lumen/
 ### 图标
 
 纸白色的圆角方形上，一圈“区域曝光”色阶环（从纯黑到纯白共 11 级）围绕着一枚镜头。可以用 `python3 Packaging/make_icon.py` 重新生成（需要 Pillow 和 NumPy）。
+
+### MCP 服务（接入 Cursor / Claude / Codex 自动修图）
+
+Lumen 内置了 **`LumenMCP`** 桥接工具，支持 Cursor、Claude Desktop、Claude Code、Codex、Antigravity 等 AI 客户端通过标准 MCP 协议（`stdio`）**实时驱动桌面上的 Lumen 窗口**。AI 的每一步操作都会直接在软件界面中以动画形式呈现（显影、扫光、流动直方图、刻度尺滑杆移动、右侧面板自动翻页等），并且随时可以用 ⌘Z 撤销。
+
+#### 1. 获取 `LumenMCP`
+
+* **通过安装包安装**：`LumenMCP` 已内置在 App 包内：
+  ```text
+  /Applications/Lumen.app/Contents/MacOS/LumenMCP
+  ```
+* **从源码编译**：
+  ```bash
+  swift build -c release
+  # 生成路径：.build/release/LumenMCP
+  ```
+
+#### 2. 配置客户端
+
+* **Cursor**（`~/.cursor/mcp.json`）或 **Claude Desktop**（`~/Library/Application Support/Claude/claude_desktop_config.json`）：
+  ```json
+  {
+    "mcpServers": {
+      "lumen": {
+        "command": "/Applications/Lumen.app/Contents/MacOS/LumenMCP",
+        "args": []
+      }
+    }
+  }
+  ```
+* **Claude Code**：
+  ```bash
+  claude mcp add lumen /Applications/Lumen.app/Contents/MacOS/LumenMCP
+  ```
+* **Codex**（`~/.codex/config.toml`）：
+  ```toml
+  [mcp_servers.lumen]
+  command = "/Applications/Lumen.app/Contents/MacOS/LumenMCP"
+  ```
+
+*（如果是源码编译运行，把路径替换为你的 `Lumen/.build/release/LumenMCP` 即可。调用工具时如果 Lumen 尚未打开，`LumenMCP` 会自动帮你启动它。）*
+
+#### 3. 支持的 MCP 工具与能力
+
+* **照片会话**：`open_photos`（打开照片）、`list_sessions`（列出胶片条）、`switch_session`（切换照片）、`close_session`（关闭）
+* **视觉分析闭环**：`get_image_analysis`（溢出比例、直方图、色彩统计）、`render_preview`（渲染预览图供 AI 直接“看图”检查）、`sample_color`（取样颜色）、`auto_white_balance`（自动灰点白平衡）
+* **参数与图层控制**：`get_edit_state`、`set_basic_adjustments`（自动切换右侧对应分页）、`reset_adjustments`、`add_layer`（支持全部 24 种调整图层）、`update_layer`、`layer_action`（删除/复制/上下移动/选中）
+* **风格与同步**：`apply_preset`（套用内置风格触发扫光动画，或加载 JSON 预设）、`sync_adjustments`（同步到全部照片）、`undo` / `redo`
+* **视图与导出**：`set_view`（开启左右对比分割线、看原图、缩放）、`export_photo`（导出全尺寸 JPEG/HEIC/PNG/16位 TIFF）、`export_lut`（导出 `.cube` LUT）
+
+#### 4. 使用示例
+
+你可以直接在 Cursor / Claude 中这样说：
+* 「用 Lumen 打开 `/Users/me/Desktop/IMG_001.jpg`，先看下直方图和画面，帮我把曝光和白平衡调准，再加一个暖调胶片风格并打开左右对比让我看看。」
+* 「把当前照片的绿色往青色偏一点，肤色饱和度降一点，检查高光没有溢出后导出 3840px 的 JPEG 到桌面。」

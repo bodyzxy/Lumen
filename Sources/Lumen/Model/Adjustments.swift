@@ -424,17 +424,67 @@ struct LayerParams: Codable, Equatable {
     var equalize = EqualizeParams()
 }
 
+enum LayerBlendMode: String, Codable, CaseIterable, Identifiable {
+    case normal
+    case multiply
+    case screen
+    case overlay
+    case softLight
+    case hardLight
+    case colorDodge
+    case colorBurn
+    case darken
+    case lighten
+    case color
+    case luminosity
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: return L("正常", "Normal")
+        case .multiply: return L("正片叠底", "Multiply")
+        case .screen: return L("滤色", "Screen")
+        case .overlay: return L("叠加", "Overlay")
+        case .softLight: return L("柔光", "Soft Light")
+        case .hardLight: return L("强光", "Hard Light")
+        case .colorDodge: return L("颜色减淡", "Color Dodge")
+        case .colorBurn: return L("颜色加深", "Color Burn")
+        case .darken: return L("变暗", "Darken")
+        case .lighten: return L("变亮", "Lighten")
+        case .color: return L("颜色", "Color")
+        case .luminosity: return L("明度", "Luminosity")
+        }
+    }
+}
+
 struct AdjustmentLayer: Identifiable, Codable, Equatable {
     var id = UUID()
     var kind: LayerKind
     var name: String
     var visible = true
     var opacity: Double = 100         // 0...100
+    var blendMode: LayerBlendMode = .normal
     var params = LayerParams()
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, name, visible, opacity, blendMode, params
+    }
 
     init(kind: LayerKind) {
         self.kind = kind
         self.name = kind.title
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = try c.decode(LayerKind.self, forKey: .kind)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? kind.title
+        visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? true
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 100
+        blendMode = try c.decodeIfPresent(LayerBlendMode.self, forKey: .blendMode) ?? .normal
+        params = try c.decodeIfPresent(LayerParams.self, forKey: .params) ?? LayerParams()
     }
 
     /// 把当前类型的参数恢复默认（保留载入的文件和取样结果）
@@ -474,10 +524,54 @@ struct AdjustmentLayer: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - 裁剪与旋转拉直
+
+struct CropSettings: Codable, Equatable {
+    /// 归一化裁剪框（0...1，左上为原点，在旋转/翻转后的坐标系中）
+    var x: Double = 0
+    var y: Double = 0
+    var width: Double = 1
+    var height: Double = 1
+    /// 水平拉直角度（-45...45 度，正数顺时针）
+    var straighten: Double = 0
+    /// 90 度顺时针旋转次数（0, 1, 2, 3）
+    var quarterTurns: Int = 0
+    var flipH: Bool = false
+    var flipV: Bool = false
+
+    var isIdentity: Bool {
+        abs(x) < 1e-4 && abs(y) < 1e-4
+            && abs(width - 1) < 1e-4 && abs(height - 1) < 1e-4
+            && abs(straighten) < 1e-3
+            && ((quarterTurns % 4) + 4) % 4 == 0
+            && !flipH && !flipV
+    }
+}
+
 // MARK: - 整体编辑状态（撤销历史保存的就是它）
 
 struct EditState: Codable, Equatable {
     var basic = BasicSettings()
     /// 数组下标 0 是最底层，最后一个是最顶层（和 PS 一样，越上面越后计算）
     var layers: [AdjustmentLayer] = []
+    var crop = CropSettings()
+
+    enum CodingKeys: String, CodingKey {
+        case basic, layers, crop
+    }
+
+    init() {}
+
+    init(basic: BasicSettings = BasicSettings(), layers: [AdjustmentLayer] = [], crop: CropSettings = CropSettings()) {
+        self.basic = basic
+        self.layers = layers
+        self.crop = crop
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        basic = try c.decodeIfPresent(BasicSettings.self, forKey: .basic) ?? BasicSettings()
+        layers = try c.decodeIfPresent([AdjustmentLayer].self, forKey: .layers) ?? []
+        crop = try c.decodeIfPresent(CropSettings.self, forKey: .crop) ?? CropSettings()
+    }
 }

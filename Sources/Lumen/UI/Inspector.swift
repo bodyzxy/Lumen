@@ -148,6 +148,25 @@ struct LayerInspector: View {
             .padding(.top, 14)
             .padding(.bottom, 4)
 
+            HStack(spacing: 10) {
+                Text(L("混合", "Blend"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Ink.text2)
+                Spacer()
+                Picker("", selection: $layer.blendMode) {
+                    ForEach(LayerBlendMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(maxWidth: 150, alignment: .trailing)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+
             ScrubRow(L("不透明度", "Opacity"), value: $layer.opacity, range: 0...100, defaultValue: 100,
                      help: "opacity", suffix: "%")
 

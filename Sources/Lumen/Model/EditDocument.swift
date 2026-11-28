@@ -133,6 +133,7 @@ final class EditDocument: ObservableObject {
     @Published var showExportSheet = false
     @Published var showInspector = true
     @Published var activeBasicTab = 0
+    @Published var isCropping = false { didSet { if isCropping != oldValue { scheduleRender() } } }
     @Published var eyedropper: Eyedropper?
 
     var lutCache: [String: CubeLUT] = [:]
@@ -441,20 +442,31 @@ final class EditDocument: ObservableObject {
             return
         }
         renderInFlight = true
-        let snapshot = state
+        var snapshot = state
+        if isCropping {
+            snapshot.crop.x = 0
+            snapshot.crop.y = 0
+            snapshot.crop.width = 1
+            snapshot.crop.height = 1
+        }
         let luts = lutCache
         let src = s.preview
+        let origSrc = s.original
         let sid = s.id
         renderQueue.async { [weak self] in
             guard let self = self else { return }
             let out = self.engine.process(src, state: snapshot, luts: luts)
             let cg = self.engine.renderCG(out)
             let hist = cg.map { self.engine.histogram(of: $0) }
+            let croppedOrig: CGImage? = snapshot.crop.isIdentity
+                ? origSrc
+                : self.engine.renderCG(RenderEngine.applyCropAndTransform(src, crop: snapshot.crop))
             DispatchQueue.main.async {
                 self.renderInFlight = false
                 // 渲染期间切换了照片，就丢掉这次结果
                 if sid == self.activeID {
                     if let cg = cg { self.previewImage = cg }
+                    if let croppedOrig = croppedOrig { self.originalImage = croppedOrig }
                     if let hist = hist { self.histogram = hist }
                     self.scheduleDetail()
                 }
@@ -511,6 +523,7 @@ final class EditDocument: ObservableObject {
         detailWork?.cancel()
         detailGeneration += 1
         guard let s = active, let preview = previewImage, zoom > 1.05,
+              state.crop.isIdentity, !isCropping,
               fitSize.width > 0, viewSize.width > 0 else {
             if detail != nil { detail = nil }
             return
@@ -855,7 +868,9 @@ final class EditDocument: ObservableObject {
     }
 
     func applyBuiltInPreset(_ preset: BuiltInPreset) {
-        state = preset.state
+        var next = preset.state
+        next.crop = state.crop
+        state = next
         selectedLayerID = nil
         sweepToken += 1
     }
@@ -888,6 +903,76 @@ final class EditDocument: ObservableObject {
             DispatchQueue.main.async {
                 self.isExporting = false
                 self.showToast(message)
+            }
+        }
+    }
+
+    func exportAll(format: RenderEngine.ExportFormat, quality: Double, maxSide: CGFloat?) {
+        guard !sessions.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = L("导出到此文件夹", "Export to Folder")
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        showExportSheet = false
+        exportAllToDirectory(dir, format: format, quality: quality, maxSide: maxSide) { _ in }
+    }
+
+    func exportAllToDirectory(
+        _ dir: URL,
+        format: RenderEngine.ExportFormat,
+        quality: Double,
+        maxSide: CGFloat?,
+        completion: @escaping (Result<[URL], Error>) -> Void
+    ) {
+        if let id = activeID, let idx = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[idx].state = state
+        }
+        let items = sessions.map { ($0.url.deletingPathExtension().lastPathComponent, $0.full, $0.state) }
+        guard !items.isEmpty else {
+            completion(.success([]))
+            return
+        }
+        isExporting = true
+        let luts = lutCache
+        let total = items.count
+        renderQueue.async { [weak self] in
+            guard let self = self else { return }
+            var exportedURLs: [URL] = []
+            var usedNames = Set<String>()
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                for (index, item) in items.enumerated() {
+                    DispatchQueue.main.async {
+                        self.showToast(L("正在批量导出 \(index + 1)/\(total)…", "Exporting \(index + 1)/\(total)…"))
+                    }
+                    var src = item.1
+                    if let m = maxSide { src = RenderEngine.downscale(src, maxSide: m) }
+                    let out = self.engine.process(src, state: item.2, luts: luts)
+                    let base = "\(item.0)-Lumen"
+                    var candidate = "\(base).\(format.ext)"
+                    var suffix = 2
+                    while usedNames.contains(candidate) {
+                        candidate = "\(base)-\(suffix).\(format.ext)"
+                        suffix += 1
+                    }
+                    usedNames.insert(candidate)
+                    let dest = dir.appendingPathComponent(candidate)
+                    try self.engine.export(out, to: dest, format: format, quality: quality)
+                    exportedURLs.append(dest)
+                }
+                DispatchQueue.main.async {
+                    self.isExporting = false
+                    self.showToast(L("已批量导出 \(exportedURLs.count) 张照片", "Batch exported \(exportedURLs.count) photos"))
+                    completion(.success(exportedURLs))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isExporting = false
+                    self.showToast(L("批量导出失败：\(error.localizedDescription)", "Batch export failed: \(error.localizedDescription)"))
+                    completion(.failure(error))
+                }
             }
         }
     }

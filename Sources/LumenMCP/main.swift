@@ -241,6 +241,11 @@ enum MCPCatalog {
                 "name": ["type": "string", "description": "Optional custom layer name."],
                 "opacity": ["type": "number", "description": "Layer opacity 0...100 (default 100)."],
                 "visible": ["type": "boolean", "description": "Layer visibility (default true)."],
+                "blend_mode": [
+                    "type": "string",
+                    "enum": ["normal", "multiply", "screen", "overlay", "softLight", "hardLight", "colorDodge", "colorBurn", "darken", "lighten", "color", "luminosity"],
+                    "description": "Layer blend mode (default normal)."
+                ],
                 "params": ["type": "object", "description": "Layer-specific parameter fields (e.g. curves: {rgb: [{x:0,y:0.06},{x:1,y:0.96}]}, hsl: {hue: [...], saturation: [...], luminance: [...]}, colorGrading: {shadows: {hue:200,saturation:20,luminance:0}, ...})."],
                 "index": ["type": "integer", "description": "Optional stack index (0 = bottom)."]
             ],
@@ -248,12 +253,16 @@ enum MCPCatalog {
         ),
         tool(
             name: "update_layer",
-            description: "Update an existing adjustment layer's visibility, opacity, name, or parameters in the live UI.",
+            description: "Update an existing adjustment layer's visibility, opacity, blend mode, name, or parameters in the live UI.",
             properties: [
                 "layer_id": ["type": "string", "description": "UUID of the layer."],
                 "name": ["type": "string"],
                 "visible": ["type": "boolean"],
                 "opacity": ["type": "number"],
+                "blend_mode": [
+                    "type": "string",
+                    "enum": ["normal", "multiply", "screen", "overlay", "softLight", "hardLight", "colorDodge", "colorBurn", "darken", "lighten", "color", "luminosity"]
+                ],
                 "params": ["type": "object", "description": "Partial parameter patch for this layer."]
             ],
             required: ["layer_id"]
@@ -358,6 +367,33 @@ enum MCPCatalog {
                 "max_side": ["type": "number", "description": "Optional max long edge in pixels; omit for original full size."]
             ],
             required: ["output_path"]
+        ),
+        tool(
+            name: "set_crop",
+            description: "Crop, rotate (90° turns), flip, or straighten the active photo using normalized coordinates (0..1, top-left origin).",
+            properties: [
+                "x": ["type": "number", "description": "Normalized left edge (0...1)."],
+                "y": ["type": "number", "description": "Normalized top edge (0...1)."],
+                "width": ["type": "number", "description": "Normalized width (0.05...1)."],
+                "height": ["type": "number", "description": "Normalized height (0.05...1)."],
+                "straighten": ["type": "number", "description": "Straighten angle in degrees (-45...45)."],
+                "quarter_turns": ["type": "integer", "description": "90-degree clockwise turns (0..3)."],
+                "flip_h": ["type": "boolean"],
+                "flip_v": ["type": "boolean"],
+                "reset": ["type": "boolean", "description": "Reset crop & transform to original."]
+            ],
+            required: []
+        ),
+        tool(
+            name: "batch_export",
+            description: "Batch export all open photos in the filmstrip to a destination directory.",
+            properties: [
+                "output_dir": ["type": "string", "description": "Destination directory path."],
+                "format": ["type": "string", "enum": ["jpeg", "heic", "png", "tiff"], "description": "Export format (default jpeg)."],
+                "quality": ["type": "number", "description": "Compression quality 0.5...1.0 (default 0.92)."],
+                "max_side": ["type": "number", "description": "Optional max long edge in pixels; omit for original full size."]
+            ],
+            required: ["output_dir"]
         ),
         tool(
             name: "export_lut",

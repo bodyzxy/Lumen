@@ -37,14 +37,20 @@ struct CanvasView: View {
                     .ignoresSafeArea()
 
                 if let edited = doc.previewImage, let original = doc.originalImage, let id = doc.activeID {
-                    PhotoView(edited: edited, original: original,
-                              width: fitSize.width * doc.zoom, height: fitSize.height * doc.zoom)
-                        .id(id)
-                        .matchedGeometryEffect(id: id, in: hero)
-                        .modifier(Develop(progress: developed))
-                        .offset(doc.pan)
-                        .position(x: stage.width / 2, y: stage.height / 2)
-                        .transition(.opacity)
+                    ZStack {
+                        PhotoView(edited: edited, original: original,
+                                  width: fitSize.width * doc.zoom, height: fitSize.height * doc.zoom)
+                        if doc.isCropping {
+                            CropOverlay(crop: $doc.state.crop,
+                                        size: CGSize(width: fitSize.width * doc.zoom, height: fitSize.height * doc.zoom))
+                        }
+                    }
+                    .id(id)
+                    .matchedGeometryEffect(id: id, in: hero)
+                    .modifier(Develop(progress: developed))
+                    .offset(doc.pan)
+                    .position(x: stage.width / 2, y: stage.height / 2)
+                    .transition(.opacity)
                 } else if doc.isLoading {
                     ProgressView().controlSize(.small)
                         .position(x: stage.width / 2, y: stage.height / 2)
@@ -158,9 +164,10 @@ struct CanvasView: View {
         }
     }
 
-    /// 照片在“适应窗口”时的显示尺寸（严格按原图比例）
+    /// 照片在“适应窗口”时的显示尺寸（按当前预览/裁剪后的比例）
     private func fittedSize(in stage: CGSize) -> CGSize {
-        let W = doc.imageSize.width, H = doc.imageSize.height
+        let W = doc.previewImage.map { CGFloat($0.width) } ?? doc.imageSize.width
+        let H = doc.previewImage.map { CGFloat($0.height) } ?? doc.imageSize.height
         guard W > 0, H > 0 else { return .zero }
         let availW = max(10, stage.width - 64)
         let availH = max(10, stage.height - 48)
@@ -747,6 +754,22 @@ struct CanvasControlBar: View {
 
             HoldOriginalButton()
 
+            Button {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+                    if doc.isCropping {
+                        doc.activeBasicTab = 0
+                        doc.isCropping = false
+                    } else {
+                        doc.selectedLayerID = nil
+                        doc.showInspector = true
+                        doc.activeBasicTab = 5
+                        doc.isCropping = true
+                    }
+                }
+            } label: { Image(systemName: "crop") }
+                .buttonStyle(BareIconStyle(active: doc.isCropping))
+                .help(L("裁剪与旋转", "Crop & Straighten"))
+
             divider
 
             Button {
@@ -841,5 +864,129 @@ struct EmptyStage: View {
                 .buttonStyle(GlassButtonStyle())
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.7), value: hover)
+    }
+}
+
+// MARK: - 交互式裁剪框
+
+private struct CropOverlay: View {
+    @Binding var crop: CropSettings
+    let size: CGSize
+
+    @State private var startCrop: CropSettings?
+
+    private enum Handle { case move, tl, tr, bl, br, t, b, l, r }
+
+    var body: some View {
+        let rx = crop.x * size.width
+        let ry = crop.y * size.height
+        let rw = crop.width * size.width
+        let rh = crop.height * size.height
+        let cropRect = CGRect(x: rx, y: ry, width: rw, height: rh)
+
+        ZStack(alignment: .topLeading) {
+            // 外部暗化遮罩
+            Path { p in
+                p.addRect(CGRect(origin: .zero, size: size))
+                p.addRect(cropRect)
+            }
+            .fill(Color.black.opacity(0.48), style: FillStyle(eoFill: true))
+            .allowsHitTesting(false)
+
+            // 三分线网格
+            Path { p in
+                for i in 1...2 {
+                    let gx = rx + rw * CGFloat(i) / 3
+                    p.move(to: CGPoint(x: gx, y: ry))
+                    p.addLine(to: CGPoint(x: gx, y: ry + rh))
+                    let gy = ry + rh * CGFloat(i) / 3
+                    p.move(to: CGPoint(x: rx, y: gy))
+                    p.addLine(to: CGPoint(x: rx + rw, y: gy))
+                }
+            }
+            .stroke(Color.white.opacity(0.38), lineWidth: 0.6)
+            .allowsHitTesting(false)
+
+            // 内部平移手势
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: max(1, rw), height: max(1, rh))
+                .offset(x: rx, y: ry)
+                .gesture(drag(.move))
+
+            // 白色外框
+            Rectangle()
+                .strokeBorder(Color.white, lineWidth: 1.2)
+                .frame(width: max(1, rw), height: max(1, rh))
+                .offset(x: rx, y: ry)
+                .allowsHitTesting(false)
+
+            // 四角 & 四边手柄
+            handleDot(x: rx, y: ry, kind: .tl)
+            handleDot(x: rx + rw, y: ry, kind: .tr)
+            handleDot(x: rx, y: ry + rh, kind: .bl)
+            handleDot(x: rx + rw, y: ry + rh, kind: .br)
+            handleDot(x: rx + rw / 2, y: ry, kind: .t)
+            handleDot(x: rx + rw / 2, y: ry + rh, kind: .b)
+            handleDot(x: rx, y: ry + rh / 2, kind: .l)
+            handleDot(x: rx + rw, y: ry + rh / 2, kind: .r)
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func handleDot(x: CGFloat, y: CGFloat, kind: Handle) -> some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 10, height: 10)
+            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+            .position(x: x, y: y)
+            .gesture(drag(kind))
+    }
+
+    private func drag(_ kind: Handle) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { v in
+                if startCrop == nil { startCrop = crop }
+                guard let s = startCrop, size.width > 1, size.height > 1 else { return }
+                let dx = Double(v.translation.width / size.width)
+                let dy = Double(v.translation.height / size.height)
+                let minSpan = 0.08
+                var nx = s.x, ny = s.y, nw = s.width, nh = s.height
+
+                switch kind {
+                case .move:
+                    nx = max(0, min(1 - s.width, s.x + dx))
+                    ny = max(0, min(1 - s.height, s.y + dy))
+                case .tl:
+                    let r = s.x + s.width, b = s.y + s.height
+                    nx = max(0, min(r - minSpan, s.x + dx)); ny = max(0, min(b - minSpan, s.y + dy))
+                    nw = r - nx; nh = b - ny
+                case .tr:
+                    let b = s.y + s.height
+                    ny = max(0, min(b - minSpan, s.y + dy))
+                    nw = max(minSpan, min(1 - s.x, s.width + dx)); nh = b - ny
+                case .bl:
+                    let r = s.x + s.width
+                    nx = max(0, min(r - minSpan, s.x + dx))
+                    nw = r - nx; nh = max(minSpan, min(1 - s.y, s.height + dy))
+                case .br:
+                    nw = max(minSpan, min(1 - s.x, s.width + dx))
+                    nh = max(minSpan, min(1 - s.y, s.height + dy))
+                case .t:
+                    let b = s.y + s.height
+                    ny = max(0, min(b - minSpan, s.y + dy)); nh = b - ny
+                case .b:
+                    nh = max(minSpan, min(1 - s.y, s.height + dy))
+                case .l:
+                    let r = s.x + s.width
+                    nx = max(0, min(r - minSpan, s.x + dx)); nw = r - nx
+                case .r:
+                    nw = max(minSpan, min(1 - s.x, s.width + dx))
+                }
+                crop.x = nx; crop.y = ny; crop.width = nw; crop.height = nh
+            }
+            .onEnded { _ in startCrop = nil }
     }
 }

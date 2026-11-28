@@ -124,6 +124,39 @@ enum CM {
         if d < -180 { d += 360 }
         return d
     }
+
+    /// 逐像素图层混合模式
+    static func blend(_ base: (Double, Double, Double), _ top: (Double, Double, Double), mode: LayerBlendMode) -> (Double, Double, Double) {
+        if mode == .normal { return top }
+        func ch(_ b: Double, _ t: Double) -> Double {
+            let b = clamp(b), t = clamp(t)
+            switch mode {
+            case .normal: return t
+            case .multiply: return b * t
+            case .screen: return 1 - (1 - b) * (1 - t)
+            case .overlay: return b < 0.5 ? 2 * b * t : 1 - 2 * (1 - b) * (1 - t)
+            case .softLight: return t <= 0.5 ? b - (1 - 2 * t) * b * (1 - b) : b + (2 * t - 1) * (sqrt(b) - b)
+            case .hardLight: return t < 0.5 ? 2 * b * t : 1 - 2 * (1 - b) * (1 - t)
+            case .colorDodge: return t >= 0.9999 ? 1 : min(1, b / max(1e-5, 1 - t))
+            case .colorBurn: return t <= 0.0001 ? 0 : max(0, 1 - (1 - b) / max(1e-5, t))
+            case .darken: return min(b, t)
+            case .lighten: return max(b, t)
+            case .color, .luminosity: return t
+            }
+        }
+        switch mode {
+        case .color:
+            let (_, _, lb) = rgbToHsl(clamp(base.0), clamp(base.1), clamp(base.2))
+            let (ht, st, _) = rgbToHsl(clamp(top.0), clamp(top.1), clamp(top.2))
+            return hslToRgb(ht, st, lb)
+        case .luminosity:
+            let (hb, sb, _) = rgbToHsl(clamp(base.0), clamp(base.1), clamp(base.2))
+            let (_, _, lt) = rgbToHsl(clamp(top.0), clamp(top.1), clamp(top.2))
+            return hslToRgb(hb, sb, lt)
+        default:
+            return (ch(base.0, top.0), ch(base.1, top.1), ch(base.2, top.2))
+        }
+    }
 }
 
 // MARK: - 单调三次曲线（曲线工具用，不会出现过冲）

@@ -7,7 +7,7 @@ struct BasicPanel: View {
     @Binding var basic: BasicSettings
 
     var body: some View {
-        Pager([L("光影", "Light"), L("色彩", "Color"), L("质感", "Texture"), L("效果", "Effects"), L("校准", "Calibrate")], selection: $doc.activeBasicTab) { page in
+        Pager([L("光影", "Light"), L("色彩", "Color"), L("质感", "Texture"), L("效果", "Effects"), L("校准", "Calibrate"), L("裁剪", "Crop")], selection: $doc.activeBasicTab) { page in
             switch page {
             case 0:
                 Group0 {
@@ -59,7 +59,7 @@ struct BasicPanel: View {
                     ScrubRow(L("颗粒大小", "Grain Size"), value: $basic.grainSize, range: 0...100, defaultValue: 25,
                              help: "basic.grainSize")
                 }
-            default:
+            case 4:
                 Group0 {
                     ScrubRow(L("阴影色调", "Shadow Tint"), value: $basic.shadowTint, range: -100...100,
                              help: "calib.shadowTint", hint: Hint.tint)
@@ -79,7 +79,18 @@ struct BasicPanel: View {
                     ScrubRow(L("饱和度", "Saturation"), value: $basic.blueSaturation, range: -100...100, help: "calib.saturation",
                              hint: [Color(white: 0.8), Color(muted: 240, s: 0.6)])
                 }
+            default:
+                CropPanel(crop: $doc.state.crop)
             }
+        }
+        .onChange(of: doc.activeBasicTab) { _, tab in
+            doc.isCropping = (tab == 5)
+        }
+        .onAppear {
+            doc.isCropping = (doc.activeBasicTab == 5)
+        }
+        .onDisappear {
+            if doc.isCropping { doc.isCropping = false }
         }
     }
 }
@@ -514,5 +525,106 @@ struct VibrancePanel: View {
             ScrubRow(L("饱和度", "Saturation"), value: $params.saturation, range: -100...100, help: "basic.saturation")
         }
         .padding(.vertical, 6)
+    }
+}
+
+struct CropPanel: View {
+    @EnvironmentObject var doc: EditDocument
+    @Binding var crop: CropSettings
+
+    private let ratios: [(String, Double?)] = [
+        (L("自由", "Free"), nil),
+        ("1:1", 1.0),
+        ("4:5", 4.0 / 5.0),
+        ("3:2", 3.0 / 2.0),
+        ("16:9", 16.0 / 9.0)
+    ]
+
+    var body: some View {
+        Group0 {
+            MicroLabel("Transform").padding(.horizontal, 18).padding(.top, 10)
+            HStack(spacing: 8) {
+                Button {
+                    crop.quarterTurns = (crop.quarterTurns + 3) % 4
+                } label: {
+                    Image(systemName: "rotate.left")
+                }
+                .buttonStyle(BareIconStyle(size: 30))
+                .help(L("逆时针旋转 90°", "Rotate 90° CCW"))
+
+                Button {
+                    crop.quarterTurns = (crop.quarterTurns + 1) % 4
+                } label: {
+                    Image(systemName: "rotate.right")
+                }
+                .buttonStyle(BareIconStyle(size: 30))
+                .help(L("顺时针旋转 90°", "Rotate 90° CW"))
+
+                Button { crop.flipH.toggle() } label: {
+                    Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                }
+                .buttonStyle(BareIconStyle(size: 30, active: crop.flipH))
+                .help(L("水平翻转", "Flip Horizontal"))
+
+                Button { crop.flipV.toggle() } label: {
+                    Image(systemName: "arrow.up.and.down.righttriangle.up.righttriangle.down")
+                }
+                .buttonStyle(BareIconStyle(size: 30, active: crop.flipV))
+                .help(L("垂直翻转", "Flip Vertical"))
+
+                Spacer()
+                Button(L("重置", "Reset")) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        crop = CropSettings()
+                    }
+                }
+                .buttonStyle(GlassButtonStyle())
+                .disabled(crop.isIdentity)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+
+            ScrubRow(L("水平拉直", "Straighten"), value: $crop.straighten, range: -45...45, decimals: 1, suffix: "°")
+
+            MicroLabel("Aspect Ratio").padding(.horizontal, 18).padding(.top, 10)
+            HStack(spacing: 6) {
+                ForEach(ratios, id: \.0) { label, r in
+                    Button(label) { applyAspect(r) }
+                        .buttonStyle(GlassButtonStyle())
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+
+            HStack {
+                Spacer()
+                Button(L("完成裁剪", "Done")) {
+                    doc.activeBasicTab = 0
+                }
+                .buttonStyle(GlassButtonStyle(prominent: true))
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+        }
+    }
+
+    private func applyAspect(_ ratio: Double?) {
+        guard let targetRatio = ratio else {
+            crop.x = 0; crop.y = 0; crop.width = 1; crop.height = 1
+            return
+        }
+        let imgW = max(1, Double(doc.previewImage?.width ?? Int(doc.imageSize.width)))
+        let imgH = max(1, Double(doc.previewImage?.height ?? Int(doc.imageSize.height)))
+        let currentRatio = imgW / imgH
+        var w = 1.0, h = 1.0
+        if targetRatio > currentRatio {
+            h = currentRatio / targetRatio
+        } else {
+            w = targetRatio / currentRatio
+        }
+        crop.x = (1 - w) / 2
+        crop.y = (1 - h) / 2
+        crop.width = w
+        crop.height = h
     }
 }

@@ -221,9 +221,10 @@ private struct PreparedLayer {
     }
 
     func apply(_ c: RGB) -> RGB {
-        let o = process(c)
-        if opacity >= 0.999 { return o }
-        return (CM.mix(c.0, o.0, opacity), CM.mix(c.1, o.1, opacity), CM.mix(c.2, o.2, opacity))
+        let processed = process(c)
+        let blended = layer.blendMode == .normal ? processed : CM.blend(c, processed, mode: layer.blendMode)
+        if opacity >= 0.999 { return blended }
+        return (CM.mix(c.0, blended.0, opacity), CM.mix(c.1, blended.1, opacity), CM.mix(c.2, blended.2, opacity))
     }
 
     private func process(_ c: RGB) -> RGB {

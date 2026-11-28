@@ -96,6 +96,7 @@ struct ExportSheet: View {
     @State private var format: RenderEngine.ExportFormat = .jpeg
     @State private var quality: Double = 92
     @State private var sizeOption: Int = 0
+    @State private var batchAll: Bool = false
 
     private let sizes: [(String, CGFloat?)] = [(L("原尺寸", "Original"), nil), ("3840", 3840), ("2048", 2048), ("1080", 1080)]
 
@@ -134,6 +135,18 @@ struct ExportSheet: View {
             .padding(.horizontal, 22)
             .padding(.vertical, 16)
 
+            if doc.filmstrip.count > 1 {
+                VStack(alignment: .leading, spacing: 10) {
+                    MicroLabel("Scope")
+                    InkSegment([
+                        (false, L("当前照片", "Current Photo")),
+                        (true, L("全部 \(doc.filmstrip.count) 张照片", "All \(doc.filmstrip.count) Photos"))
+                    ], selection: $batchAll)
+                }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 16)
+            }
+
             Rectangle().fill(Ink.line).frame(height: 0.5)
 
             HStack {
@@ -141,8 +154,12 @@ struct ExportSheet: View {
                     .buttonStyle(GlassButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(L("选择位置并导出", "Choose Location & Export")) {
-                    doc.export(format: format, quality: quality / 100, maxSide: sizes[sizeOption].1)
+                Button(batchAll ? L("选择文件夹并批量导出", "Choose Folder & Batch Export") : L("选择位置并导出", "Choose Location & Export")) {
+                    if batchAll && doc.filmstrip.count > 1 {
+                        doc.exportAll(format: format, quality: quality / 100, maxSide: sizes[sizeOption].1)
+                    } else {
+                        doc.export(format: format, quality: quality / 100, maxSide: sizes[sizeOption].1)
+                    }
                 }
                 .buttonStyle(GlassButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)

@@ -286,6 +286,9 @@ final class IPCServer {
             if let visible = params["visible"] as? Bool {
                 layer.visible = visible
             }
+            if let bm = params["blend_mode"] as? String, let mode = LayerBlendMode(rawValue: bm) {
+                layer.blendMode = mode
+            }
             if let layerParamsPatch = params["params"] as? [String: Any] {
                 if let mergedParams = Self.decodeMergedLayerParams(base: layer.params, kind: kind, patch: layerParamsPatch) {
                     layer.params = mergedParams
@@ -327,6 +330,7 @@ final class IPCServer {
             if let name = params["name"] as? String { layer.name = name }
             if let visible = params["visible"] as? Bool { layer.visible = visible }
             if let opacity = params["opacity"] as? Double { layer.opacity = max(0, min(100, opacity)) }
+            if let bm = params["blend_mode"] as? String, let mode = LayerBlendMode(rawValue: bm) { layer.blendMode = mode }
             if let patch = params["params"] as? [String: Any] {
                 if let merged = Self.decodeMergedLayerParams(base: layer.params, kind: layer.kind, patch: patch) {
                     layer.params = merged
@@ -552,6 +556,50 @@ final class IPCServer {
                 switch res {
                 case .success(let u): done(.success(["output_path": u.path, "format": format.rawValue]))
                 case .failure(let e): done(.failure(IPCError(code: -32002, message: e.localizedDescription)))
+                }
+            }
+
+        case "set_crop":
+            guard doc.hasImage else {
+                done(.failure(IPCError(code: -32003, message: "No photo open"))); return
+            }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.84)) {
+                doc.selectedLayerID = nil
+                doc.activeBasicTab = 5
+                if (params["reset"] as? Bool) == true {
+                    doc.state.crop = CropSettings()
+                } else {
+                    if let x = params["x"] as? Double { doc.state.crop.x = max(0, min(0.95, x)) }
+                    if let y = params["y"] as? Double { doc.state.crop.y = max(0, min(0.95, y)) }
+                    if let w = params["width"] as? Double { doc.state.crop.width = max(0.05, min(1 - doc.state.crop.x, w)) }
+                    if let h = params["height"] as? Double { doc.state.crop.height = max(0.05, min(1 - doc.state.crop.y, h)) }
+                    if let s = params["straighten"] as? Double { doc.state.crop.straighten = max(-45, min(45, s)) }
+                    if let qt = params["quarter_turns"] as? Int { doc.state.crop.quarterTurns = ((qt % 4) + 4) % 4 }
+                    if let fh = params["flip_h"] as? Bool { doc.state.crop.flipH = fh }
+                    if let fv = params["flip_v"] as? Bool { doc.state.crop.flipV = fv }
+                }
+            }
+            doc.showToast("AI · \(L("裁剪与旋转", "Crop & Straighten"))")
+            done(.success(["crop": Self.toDict(doc.state.crop) ?? [:]]))
+
+        case "batch_export":
+            guard doc.hasImage else {
+                done(.failure(IPCError(code: -32003, message: "No photo open"))); return
+            }
+            guard let outDir = params["output_dir"] as? String else {
+                done(.failure(IPCError(code: -32602, message: "Missing 'output_dir'"))); return
+            }
+            let fmtStr = (params["format"] as? String ?? "jpeg").uppercased()
+            let format = RenderEngine.ExportFormat(rawValue: fmtStr) ?? .jpeg
+            let quality = (params["quality"] as? Double) ?? 0.92
+            let maxSide = (params["max_side"] as? Double).map { CGFloat($0) }
+            let dirURL = URL(fileURLWithPath: (outDir as NSString).expandingTildeInPath, isDirectory: true)
+            doc.exportAllToDirectory(dirURL, format: format, quality: quality, maxSide: maxSide) { res in
+                switch res {
+                case .success(let urls):
+                    done(.success(["output_dir": dirURL.path, "count": urls.count, "files": urls.map { $0.path }]))
+                case .failure(let e):
+                    done(.failure(IPCError(code: -32002, message: e.localizedDescription)))
                 }
             }
 

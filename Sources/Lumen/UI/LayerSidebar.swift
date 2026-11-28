@@ -96,10 +96,17 @@ struct LayerRow: View {
                     .foregroundStyle(layer.visible ? Ink.text : Ink.text3)
                     .strikethrough(!layer.visible, color: Ink.text3)
                     .lineLimit(1)
-                if layer.opacity < 100 {
-                    Text("\(Int(layer.opacity))%")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Ink.text3)
+                if layer.opacity < 100 || layer.blendMode != .normal {
+                    HStack(spacing: 5) {
+                        if layer.blendMode != .normal {
+                            Text(layer.blendMode.title)
+                        }
+                        if layer.opacity < 100 {
+                            Text("\(Int(layer.opacity))%")
+                        }
+                    }
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Ink.text3)
                 }
             }
             Spacer(minLength: 4)

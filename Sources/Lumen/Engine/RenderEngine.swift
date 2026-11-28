@@ -189,7 +189,64 @@ final class RenderEngine {
             img = grain(img, amount: b.grain / 100, size: b.grainSize / 100, extent: extent, longSide: longSide)
         }
 
-        return img.cropped(to: extent)
+        img = img.cropped(to: extent)
+        if !state.crop.isIdentity {
+            img = RenderEngine.applyCropAndTransform(img, crop: state.crop)
+        }
+        return img
+    }
+
+    static func applyCropAndTransform(_ source: CIImage, crop: CropSettings) -> CIImage {
+        if crop.isIdentity { return source }
+        var img = normalized(source)
+        var w = img.extent.width
+        var h = img.extent.height
+        guard w > 1, h > 1 else { return img }
+
+        let turns = ((crop.quarterTurns % 4) + 4) % 4
+        if turns != 0 || crop.flipH || crop.flipV {
+            var t = CGAffineTransform(translationX: w / 2, y: h / 2)
+            if turns != 0 {
+                // Core Image Y-up: 90° CW is -pi/2
+                t = t.rotated(by: -CGFloat(turns) * .pi / 2)
+            }
+            t = t.scaledBy(x: crop.flipH ? -1 : 1, y: crop.flipV ? -1 : 1)
+            t = t.translatedBy(x: -w / 2, y: -h / 2)
+            img = normalized(img.transformed(by: t))
+            w = img.extent.width
+            h = img.extent.height
+        }
+
+        if abs(crop.straighten) >= 1e-3 {
+            let rad = -CGFloat(crop.straighten) * .pi / 180.0
+            let c = abs(cos(rad)), s = abs(sin(rad))
+            let scale = min(w / max(1, w * c + h * s), h / max(1, w * s + h * c))
+            var t = CGAffineTransform(translationX: w / 2, y: h / 2)
+            t = t.rotated(by: rad)
+            t = t.translatedBy(x: -w / 2, y: -h / 2)
+            img = img.transformed(by: t)
+            let iw = w * scale, ih = h * scale
+            let ix = (w - iw) / 2, iy = (h - ih) / 2
+            img = normalized(img.cropped(to: CGRect(x: ix, y: iy, width: iw, height: ih)))
+            w = img.extent.width
+            h = img.extent.height
+        }
+
+        let cx = max(0, min(1, crop.x))
+        let cy = max(0, min(1, crop.y))
+        let cw = max(0.02, min(1 - cx, crop.width))
+        let ch = max(0.02, min(1 - cy, crop.height))
+        if abs(cx) > 1e-4 || abs(cy) > 1e-4 || abs(cw - 1) > 1e-4 || abs(ch - 1) > 1e-4 {
+            // crop.y is top-origin (SwiftUI), CIImage is bottom-origin
+            let rect = CGRect(
+                x: cx * w,
+                y: (1 - cy - ch) * h,
+                width: max(2, cw * w),
+                height: max(2, ch * h)
+            )
+            img = normalized(img.cropped(to: rect))
+        }
+        return img
     }
 
     static func whiteBalanceGains(temperature: Double, tint: Double) -> (Double, Double, Double) {
@@ -263,6 +320,9 @@ final class RenderEngine {
         default:
             break
         }
+        if let filterName = ciBlendFilter(for: layer.blendMode) {
+            img = img.applyingFilter(filterName, parameters: [kCIInputBackgroundImageKey: input])
+        }
         if layer.opacity < 99.9 {
             img = input.applyingFilter("CIDissolveTransition", parameters: [
                 kCIInputTargetImageKey: img,
@@ -270,6 +330,23 @@ final class RenderEngine {
             ])
         }
         return img.cropped(to: extent)
+    }
+
+    private func ciBlendFilter(for mode: LayerBlendMode) -> String? {
+        switch mode {
+        case .normal: return nil
+        case .multiply: return "CIMultiplyBlendMode"
+        case .screen: return "CIScreenBlendMode"
+        case .overlay: return "CIOverlayBlendMode"
+        case .softLight: return "CISoftLightBlendMode"
+        case .hardLight: return "CIHardLightBlendMode"
+        case .colorDodge: return "CIColorDodgeBlendMode"
+        case .colorBurn: return "CIColorBurnBlendMode"
+        case .darken: return "CIDarkenBlendMode"
+        case .lighten: return "CILightenBlendMode"
+        case .color: return "CIColorBlendMode"
+        case .luminosity: return "CILuminosityBlendMode"
+        }
     }
 
     private func localContrast(_ img: CIImage, amount: Double, radius: Double, strength: Double, extent: CGRect) -> CIImage {

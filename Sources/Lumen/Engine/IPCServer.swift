@@ -453,18 +453,27 @@ final class IPCServer {
             guard doc.hasImage else {
                 done(.failure(IPCError(code: -32003, message: "No photo open"))); return
             }
+            let useOriginal = (params["source"] as? String) == "original"
+            let targetCG = useOriginal ? doc.originalImage : (doc.previewImage ?? doc.originalImage)
             doc.currentColorStats { stats in
                 var res: [String: Any] = [
                     "file_name": doc.fileName,
+                    "source": useOriginal ? "original" : "preview",
                     "width": Int(doc.imageSize.width),
                     "height": Int(doc.imageSize.height)
                 ]
-                if let h = doc.histogram {
-                    res["clip_low_ratio"] = h.clipLow
-                    res["clip_high_ratio"] = h.clipHigh
-                    res["histogram_luma_16bins"] = Self.downsample16(h.luma)
+                if let cg = targetCG {
+                    let hist = useOriginal ? doc.engine.histogram(of: cg) : (doc.histogram ?? doc.engine.histogram(of: cg))
+                    res["clip_low_ratio"] = hist.clipLow
+                    res["clip_high_ratio"] = hist.clipHigh
+                    res["histogram_luma_16bins"] = Self.downsample16(hist.luma)
+                    res["histogram_red_16bins"] = Self.downsample16(hist.red)
+                    res["histogram_green_16bins"] = Self.downsample16(hist.green)
+                    res["histogram_blue_16bins"] = Self.downsample16(hist.blue)
+                    let detail = Self.computeTonalAndColorZones(doc.engine, cg: cg, lumaCounts: hist.lumaCounts)
+                    for (k, v) in detail { res[k] = v }
                 }
-                if let st = stats {
+                if let st = stats, !useOriginal {
                     res["ycbcr_mean"] = st.mean
                     res["ycbcr_std"] = st.std
                 }
@@ -632,6 +641,82 @@ final class IPCServer {
             let avg = slice.reduce(0, +) / 16.0
             return (avg * 1000).rounded() / 1000
         }
+    }
+
+    private static func round3(_ v: Double) -> Double {
+        (v * 1000).rounded() / 1000
+    }
+
+    /// 计算暗部/中间调/高光分区统计、暗部细节留存率、RGB 均值与色偏倾向
+    private static func computeTonalAndColorZones(_ engine: RenderEngine, cg: CGImage, lumaCounts: [Double]) -> [String: Any] {
+        let (px, w, h) = engine.pixels(of: cg, maxSide: 256)
+        let total = max(1, w * h)
+        var sCount = 0, mCount = 0, hCount = 0, nearBlack = 0, nearWhite = 0
+        var sRGB = [0.0, 0.0, 0.0], mRGB = [0.0, 0.0, 0.0], hRGB = [0.0, 0.0, 0.0], allRGB = [0.0, 0.0, 0.0]
+        var sLuma = 0.0, mLuma = 0.0, hLuma = 0.0, satSum = 0.0
+
+        for i in 0..<total {
+            let r = Double(px[i * 4]) / 255.0
+            let g = Double(px[i * 4 + 1]) / 255.0
+            let b = Double(px[i * 4 + 2]) / 255.0
+            let y = 0.299 * r + 0.587 * g + 0.114 * b
+            let mx = max(r, max(g, b)), mn = min(r, min(g, b))
+            satSum += mx > 1e-4 ? (mx - mn) / mx : 0
+            allRGB[0] += r; allRGB[1] += g; allRGB[2] += b
+            if y < 0.05 { nearBlack += 1 }
+            if y > 0.95 { nearWhite += 1 }
+            if y < 0.25 {
+                sCount += 1; sLuma += y
+                sRGB[0] += r; sRGB[1] += g; sRGB[2] += b
+            } else if y <= 0.75 {
+                mCount += 1; mLuma += y
+                mRGB[0] += r; mRGB[1] += g; mRGB[2] += b
+            } else {
+                hCount += 1; hLuma += y
+                hRGB[0] += r; hRGB[1] += g; hRGB[2] += b
+            }
+        }
+
+        func zoneDict(_ count: Int, _ lumaSum: Double, _ rgbSum: [Double]) -> [String: Any] {
+            let d = Double(max(1, count))
+            return [
+                "ratio": round3(Double(count) / Double(total)),
+                "mean_luma": count > 0 ? round3(lumaSum / d) : 0,
+                "mean_rgb": count > 0 ? rgbSum.map { round3($0 / d) } : [0, 0, 0]
+            ]
+        }
+
+        let meanRGB = allRGB.map { round3($0 / Double(total)) }
+        let warmCool = meanRGB[0] - meanRGB[2]
+        let greenTint = meanRGB[1] - (meanRGB[0] + meanRGB[2]) * 0.5
+        var cast = "neutral"
+        if abs(warmCool) > 0.035 { cast = warmCool > 0 ? "warm" : "cool" }
+        else if abs(greenTint) > 0.025 { cast = greenTint > 0 ? "greenish" : "magenta" }
+
+        let lumaTotal = max(1.0, lumaCounts.reduce(0, +))
+        func percentile(_ p: Double) -> Double {
+            var acc = 0.0
+            let target = p * lumaTotal
+            for (idx, c) in lumaCounts.enumerated() {
+                acc += c
+                if acc >= target { return round3(Double(idx) / 255.0) }
+            }
+            return 1.0
+        }
+        let p05 = percentile(0.05), p95 = percentile(0.95)
+        return [
+            "rgb_mean": meanRGB,
+            "saturation_mean": round3(satSum / Double(total)),
+            "color_cast_hint": cast,
+            "near_black_ratio": round3(Double(nearBlack) / Double(total)),
+            "near_white_ratio": round3(Double(nearWhite) / Double(total)),
+            "luma_p05": p05,
+            "luma_p95": p95,
+            "contrast_spread": round3(p95 - p05),
+            "shadows": zoneDict(sCount, sLuma, sRGB),
+            "midtones": zoneDict(mCount, mLuma, mRGB),
+            "highlights": zoneDict(hCount, hLuma, hRGB)
+        ]
     }
 
     private func encodeSuccess(id: Any?, result: Any) -> Data {
